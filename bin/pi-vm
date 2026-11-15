@@ -9,7 +9,8 @@
 #   pi-vm log [run-dir]     follow a run's log live (default: the newest run); Ctrl+C stops watching
 #   pi-vm model [ID]        show the default model, or check that ID exists on OpenRouter
 #   pi-vm set-key           save OPENROUTER_API_KEY to ~/.bashrc.d/openrouter.sh (asks for it)
-#   pi-vm build             (re)build the image, e.g. after editing image/ or to update pi
+#   pi-vm build             (re)build the image, e.g. after editing image/
+#   pi-vm update            rebuild with the newest pi from npm, if it is newer than the image's
 #
 # Inside the VM pi has full access (pi has no sandbox or approvals). The VM only sees the clone,
 # the OpenRouter key and the network: no SSH keys, no gh token, no git remote, so it cannot push.
@@ -191,8 +192,26 @@ cmd_build() {
   podman build --pull=newer -t "$IMAGE" "$@" "$here/../image" && podman image prune -f >/dev/null
 }
 
+# The image pins pi (PI_VERSION in image/Containerfile) so a pi release can't change a handoff
+# mid-project. update rebuilds with the newest pi on npm, only when it is newer than the image's.
+cmd_update() {
+  local latest current
+  latest=$(curl -fsS --max-time 20 https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest | jq -r .version) \
+    || die "couldn't reach the npm registry"
+  # pi prints its version on stderr.
+  current=$(podman run --rm --runtime "$RUNTIME" "$IMAGE" pi --version 2>&1 | tail -n1) || current=
+  [[ -n $current ]] || current=none
+  if [[ $current == "$latest" ]]; then
+    echo "pi $current is the latest; nothing to do"
+    return
+  fi
+  echo "pi in the image: $current; latest: $latest. Rebuilding."
+  cmd_build --build-arg "PI_VERSION=$latest"
+  echo "pi $latest installed. To make it the default for fresh builds, set PI_VERSION=$latest in image/Containerfile."
+}
+
 case ${1:-} in
-  run|apply|clean|list|log|model|build) cmd=$1; shift; "cmd_$cmd" "$@" ;;
+  run|apply|clean|list|log|model|build|update) cmd=$1; shift; "cmd_$cmd" "$@" ;;
   set-key) shift; cmd_set_key "$@" ;;
-  *) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

@@ -71,24 +71,32 @@ for why libkrun, and for the `no-ipv6` wrapper that works around a libkrun TSI k
 
 ## Requirements
 
-- Linux with KVM (`/dev/kvm`), rootless Podman, and `crun-krun` (Fedora: `sudo dnf install crun-krun`)
-- `curl` and `jq` on the host
-- An OpenRouter API key
+- Linux with KVM (`/dev/kvm`), rootless Podman, and the libkrun runtime (Fedora:
+  `sudo dnf install podman crun-krun`). Without libkrun, `./install.sh --container` runs pi in a
+  plain rootless container instead: same flow, but it shares your kernel.
+- `git`, `curl` and `jq` on the host
+- An OpenRouter API key ([openrouter.ai/keys](https://openrouter.ai/keys)); give it a credit limit
+- [Claude Code](https://claude.com/claude-code), for the skill
 
 ## Install
 
 ```bash
 git clone https://github.com/stansz/pi-vm ~/code/pi-vm
 cd ~/code/pi-vm
-bin/pi-vm build                                    # ~2.5 GB image, a few minutes
-ln -sf "$PWD/bin/pi-vm" ~/.local/bin/pi-vm
-pi-vm set-key                                      # saves the key to ~/.bashrc.d/openrouter.sh
-mkdir -p ~/.claude/skills && cp -r skills/pi-handoff ~/.claude/skills/
+./install.sh
 ```
 
-`set-key` writes `export OPENROUTER_API_KEY=...` to `~/.bashrc.d/openrouter.sh` (mode 600), which
-Fedora's default `~/.bashrc` sources. Elsewhere, source that file from your shell's rc file. Start
-Claude Code from a new shell so it has the key.
+The installer checks the prerequisites (and says how to install what is missing), links `pi-vm`
+into `~/.local/bin`, writes `~/.config/pi-vm/config` from `config.example`, installs the
+`pi-handoff` skill into `~/.claude/skills/`, asks for your OpenRouter key, builds the image
+(~2.5 GB, a few minutes) and runs pi inside the VM as a smoke test. Run it again to update; it
+keeps your config and key. `./install.sh --uninstall` removes the link, the skill, the image and
+the caches.
+
+The key goes to `~/.bashrc.d/openrouter.sh` (mode 600), which Fedora's default `~/.bashrc`
+sources; elsewhere, source that file from your shell's rc file. Start Claude Code from a new
+shell so it has the key. If Claude Code runs as a service (systemd, launchd), the key must be in
+that service's environment too.
 
 Then in Claude Code: "hand it off to pi".
 
@@ -102,10 +110,13 @@ pi-vm list              list runs
 pi-vm log [run-dir]     follow a run's log live (default: the newest run)
 pi-vm model [ID]        show the default model, or check an OpenRouter model ID
 pi-vm set-key           save OPENROUTER_API_KEY
+pi-vm update            rebuild with the newest pi, if it is newer than the image's
 pi-vm build             (re)build the image
 ```
 
 ## Updating pi
 
-Bump `PI_VERSION` in `image/Containerfile`, or build with
-`pi-vm build --build-arg PI_VERSION=x.y.z`.
+The image pins pi (`PI_VERSION` in `image/Containerfile`), so a pi release can't change how
+handoffs behave mid-project. `pi-vm update` checks npm and rebuilds with the newest pi only when it
+is newer than the image's; `pi-vm build --build-arg PI_VERSION=x.y.z` picks a version by hand. To
+update pi-vm itself: `git pull && ./install.sh`.
