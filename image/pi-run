@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Runs inside the VM: pi in JSON-event mode on /work, with the raw events kept in
+# .handoff/events.jsonl and a readable log on stdout. pi's JSON mode always exits 0, so the exit
+# status comes from how the last assistant message ended.
+set -uo pipefail
+mkdir -p /work/.handoff
+events=/work/.handoff/events.jsonl
+
+no-ipv6 pi --mode json --no-session --provider openrouter \
+  --model "$PI_VM_MODEL" --thinking "$PI_VM_THINKING" "$1" 2>&1 \
+  | tee "$events" | jq --unbuffered -rR -f /usr/local/share/pi-vm/render.jq
+status=${PIPESTATUS[0]}
+
+summary=$(jq -rRs -f /usr/local/share/pi-vm/summary.jq "$events")
+echo "$summary"
+if (( status == 0 )) && grep -q '^pi-vm: run failed' <<<"$summary"; then status=1; fi
+exit "$status"

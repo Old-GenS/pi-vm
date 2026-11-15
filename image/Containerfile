@@ -1,0 +1,36 @@
+# The handoff VM: pi plus the tools a handoff may need (git, Node 24, headless Chromium).
+# Runs under podman --runtime krun, so each handoff gets its own kernel.
+FROM registry.fedoraproject.org/fedora:45
+
+RUN dnf -y install --setopt=install_weak_deps=False \
+      nodejs24 nodejs24-bin nodejs24-npm nodejs24-npm-bin \
+      chromium git-core findutils procps-ng which diffutils \
+      ripgrep fd-find jq curl unzip tar gzip xz patch less file tree python3 \
+      gcc gcc-c++ make \
+    && dnf clean all
+
+# pi runs as root in the VM, so it can dnf install what a task needs. Under rootless podman that
+# root is your own unprivileged user on the host, behind the VM boundary, and files it writes to
+# /work come back owned by you. (sudo doesn't work under krun: setuid binaries don't get root over
+# virtiofs.) Chromium refuses to run as root without --no-sandbox; the VM is the sandbox here.
+RUN echo 'CHROMIUM_FLAGS+=" --no-sandbox"' >> /etc/chromium/chromium.conf
+
+# libkrun's TSI networking has a kernel bug: getsockopt(IPPROTO_IPV6, IPV6_V6ONLY) on some TSI
+# stream sockets calls a null function pointer and oopses the guest kernel. Chromium's network
+# thread hits it now and then, which kills that thread and hangs the browser. no-ipv6 makes
+# socket(AF_INET6, ...) fail with EAFNOSUPPORT, as on a machine without IPv6, so everything in the
+# VM falls back to IPv4 and never reaches that path. pi-run starts pi through it.
+COPY no-ipv6.c /tmp/no-ipv6.c
+RUN gcc -O2 -o /usr/local/bin/no-ipv6 /tmp/no-ipv6.c && rm /tmp/no-ipv6.c
+
+ARG PI_VERSION=0.73.1
+RUN npm install -g "@mariozechner/pi-coding-agent@${PI_VERSION}" corepack && corepack enable \
+    && npm cache clean --force
+
+# No update checks or install telemetry from inside the VM.
+ENV HOME=/root PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
+COPY settings.json /root/.pi/agent/settings.json
+COPY render.jq summary.jq /usr/local/share/pi-vm/
+COPY pi-run /usr/local/bin/pi-run
+
+WORKDIR /work

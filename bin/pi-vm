@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# pi-vm: run a pi handoff inside a microVM, on a throwaway clone of the repo.
+#
+#   pi-vm run [--model ID] [--thinking LEVEL] "<prompt>"
+#                           clone the repo (plus .handoff/) and run pi in a VM; prints the run dir
+#   pi-vm apply <run-dir>   copy the run's changes into the repo as uncommitted changes
+#   pi-vm clean <run-dir>   delete a run (or --all)
+#   pi-vm list              list runs
+#   pi-vm log [run-dir]     follow a run's log live (default: the newest run); Ctrl+C stops watching
+#   pi-vm model [ID]        show the default model, or check that ID exists on OpenRouter
+#   pi-vm set-key           save OPENROUTER_API_KEY to ~/.bashrc.d/openrouter.sh (asks for it)
+#   pi-vm build             (re)build the image, e.g. after editing image/ or to update pi
+#
+# Inside the VM pi has full access (pi has no sandbox or approvals). The VM only sees the clone,
+# the OpenRouter key and the network: no SSH keys, no gh token, no git remote, so it cannot push.
+set -euo pipefail
+
+CONFIG=${PI_VM_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pi-vm/config}
+# shellcheck disable=SC1090
+[[ -f $CONFIG ]] && source "$CONFIG"
+
+MODEL=${PI_VM_MODEL:-xiaomi/mimo-v2.6-flash}   # an OpenRouter model ID
+THINKING=${PI_VM_THINKING:-low}                # off|minimal|low|medium|high|xhigh
+# OpenRouter provider routing, sent as-is as the request's "provider" field. The default skips
+# fp4/int4 endpoints, which are cheaper but noticeably worse at long agentic runs. Set to {} to
+# let OpenRouter pick any endpoint.
+ROUTING=${PI_VM_ROUTING:-'{"quantizations":["fp16","bf16","fp8"]}'}
+IMAGE=${PI_VM_IMAGE:-localhost/pi-vm:latest}
+RUNTIME=${PI_VM_RUNTIME:-krun}          # set to runc/crun to run as a plain container
+MEMORY=${PI_VM_MEMORY:-2g}
+CPUS=${PI_VM_CPUS:-2}
+TIMEOUT_MIN=${PI_VM_TIMEOUT_MIN:-90}    # the VM is killed after this many minutes
+RUNS=${PI_VM_RUNS:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-vm/runs}
+# npm's download cache and ~/.cache, kept between runs (podman volumes) so `npm ci` and
+# Playwright/Puppeteer browser downloads happen once. npm checks every package's hash; a run could
+# tamper with ~/.cache, but the next run gets nothing the earlier one didn't already have.
+NPM_CACHE=${PI_VM_NPM_CACHE:-pi-vm-npm}
+HOME_CACHE=${PI_VM_CACHE:-pi-vm-cache}
+KEY_FILE=$HOME/.bashrc.d/openrouter.sh
+
+die() { echo "pi-vm: $*" >&2; exit 1; }
+
+# A run dir must sit directly inside $RUNS, so apply/clean never touch anything else.
+run_dir() {
+  local dir
+  dir=$(realpath -e -- "${1:?run dir required}") || die "no such run: $1"
+  [[ $(dirname -- "$dir") == "$(realpath -m -- "$RUNS")" ]] || die "not a run dir under $RUNS: $1"
+  printf '%s\n' "$dir"
+}
+
+# Print OpenRouter's public metadata for a model as one JSON object, or fail if it doesn't exist.
+model_info() {
+  local id=$1
+  curl -fsS --max-time 20 https://openrouter.ai/api/v1/models \
+    | jq -ce --arg id "$id" '.data[] | select(.id == $id)' \
+    || die "model '$id' not found on OpenRouter (see https://openrouter.ai/models)"
+}
+
+# pi's models.json for one OpenRouter model. pi's built-in OpenRouter list lags behind new models,
+# so pi-vm always describes the model itself, from OpenRouter's own metadata (prices in $/M tokens,
+# so pi's cost totals are right).
+models_json() {
+  jq -n --argjson m "$1" --argjson routing "$ROUTING" '
+    def per_m: ((. // "0") | tonumber) * 1000000;
+    { providers: { openrouter: { models: [ {
+        id: $m.id,
+        name: $m.name,
+        reasoning: (($m.supported_parameters // []) | index("reasoning") != null),
+        input: (if (($m.architecture.input_modalities // []) | index("image")) then ["text","image"] else ["text"] end),
+        contextWindow: $m.context_length,
+        maxTokens: ($m.top_provider.max_completion_tokens // 32000),
+        cost: { input: ($m.pricing.prompt | per_m), output: ($m.pricing.completion | per_m),
+                cacheRead: ($m.pricing.input_cache_read | per_m),
+                cacheWrite: ($m.pricing.input_cache_write | per_m) },
+        compat: ({ openRouterRouting: $routing } | if $routing == {} then {} else . end)
+    } ] } } }'
+}
+
+cmd_run() {
+  local model=$MODEL thinking=$THINKING
+  while [[ ${1:-} == --* ]]; do
+    case $1 in
+      --model) model=${2:?--model needs an OpenRouter model ID}; shift 2 ;;
+      --thinking) thinking=${2:?--thinking needs a level}; shift 2 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  local prompt=${1:?prompt required}
+  case $thinking in off|minimal|low|medium|high|xhigh) ;; *) die "bad --thinking: $thinking" ;; esac
+  [[ -n ${OPENROUTER_API_KEY:-} ]] || die "OPENROUTER_API_KEY is not set (run: pi-vm set-key)"
+  local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
+  [[ -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"
+  local info; info=$(model_info "$model")
+
+  local dir; dir="$RUNS/$(basename -- "$repo")-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p -- "$RUNS"
+  # --no-hardlinks: the VM must not be able to reach the repo's object files.
+  git clone -q --no-hardlinks -- "$repo" "$dir"
+  git -C "$dir" remote remove origin
+  cp -a -- "$repo/.handoff/." "$dir/.handoff/"
+  rm -f -- "$dir/.handoff/"{report.md,last-run.log,events.jsonl,run.json}
+  # Outside the clone, so pi can't edit its own model config mid-run.
+  local agent_dir="$dir.pi"
+  mkdir -p -- "$agent_dir"
+  models_json "$info" >"$agent_dir/models.json"
+  jq -n --arg model "$model" --arg thinking "$thinking" --argjson routing "$ROUTING" \
+    '{model: $model, thinking: $thinking, routing: $routing}' >"$dir/.handoff/run.json"
+
+  echo "$dir"
+  echo "pi-vm: model $model, thinking $thinking"
+  local status=0 started=$SECONDS
+  podman run --rm --runtime "$RUNTIME" --memory "$MEMORY" --cpus "$CPUS" \
+    --timeout "$((TIMEOUT_MIN * 60))" --name "pi-vm-$(basename -- "$dir")" \
+    -e OPENROUTER_API_KEY -e PI_VM_MODEL="$model" -e PI_VM_THINKING="$thinking" \
+    -v "$dir:/work:Z" -v "$agent_dir/models.json:/root/.pi/agent/models.json:ro,Z" \
+    -v "$NPM_CACHE:/root/.npm" -v "$HOME_CACHE:/root/.cache" -w /work "$IMAGE" \
+    pi-run "$prompt" >"$dir/.handoff/last-run.log" 2>&1 || status=$?
+  if (( status != 0 && SECONDS - started >= TIMEOUT_MIN * 60 )); then
+    echo "pi-vm: timed out after $TIMEOUT_MIN minutes; the VM was stopped" \
+      | tee -a "$dir/.handoff/last-run.log"
+  fi
+  echo "pi-vm: exited $status; log in $dir/.handoff/last-run.log"
+  return "$status"
+}
+
+cmd_apply() {
+  local dir; dir=$(run_dir "${1:-}")
+  local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
+  [[ $(git -C "$dir" rev-parse HEAD) == $(git -C "$repo" rev-parse HEAD) ]] \
+    || die "repo HEAD moved since the run; apply by hand"
+  [[ -z $(git -C "$repo" status --porcelain -- . ':(exclude).handoff') ]] \
+    || die "repo has uncommitted changes; commit or stash first"
+  # Stage everything in the clone (respecting .gitignore) and replay it as unstaged changes;
+  # new files land untracked, as if pi had run in the repo itself.
+  git -C "$dir" add -A
+  git -C "$dir" diff --cached --binary HEAD -- . ':(exclude).handoff' | git -C "$repo" apply --allow-empty
+  for f in report.md last-run.log; do
+    [[ -f $dir/.handoff/$f ]] && cp -- "$dir/.handoff/$f" "$repo/.handoff/$f"
+  done
+  git -C "$repo" status --short
+}
+
+cmd_clean() {
+  if [[ ${1:-} == --all ]]; then
+    rm -rf -- "${RUNS:?}"/*
+  else
+    local dir; dir=$(run_dir "${1:-}")
+    rm -rf -- "$dir" "$dir.pi"
+  fi
+}
+
+cmd_list() { ls -1 -- "$RUNS" 2>/dev/null | grep -v '\.pi$' || true; }
+
+cmd_log() {
+  local dir
+  if [[ -n ${1:-} ]]; then
+    dir=$(run_dir "$1")
+  else
+    dir=$(ls -1td -- "$RUNS"/*/ 2>/dev/null | grep -v '\.pi/$' | head -1) || true
+    [[ -n $dir ]] || die "no runs in $RUNS"
+    dir=${dir%/}
+  fi
+  echo "== $dir/.handoff/last-run.log (Ctrl+C stops watching; the run keeps going)" >&2
+  tail -n +1 -F -- "$dir/.handoff/last-run.log"
+}
+
+cmd_model() {
+  local id=${1:-$MODEL}
+  model_info "$id" | jq -r --arg thinking "$THINKING" --arg dflt "$MODEL" '
+    def per_m: ((. // "0") | tonumber) * 1000000 | . * 1000 | round / 1000;
+    "\(.id)\(if .id == $dflt then "  (default, thinking \($thinking))" else "" end)",
+    "  \(.name)",
+    "  context \(.context_length) tokens",
+    "  $/M tokens: input \(.pricing.prompt | per_m), output \(.pricing.completion | per_m), cached input \(.pricing.input_cache_read | per_m)",
+    "  reasoning: \(if ((.supported_parameters // []) | index("reasoning")) then "yes" else "no" end)"'
+}
+
+cmd_set_key() {
+  local key
+  read -rsp "OpenRouter API key (input hidden): " key; echo
+  [[ $key == sk-or-* ]] || die "that doesn't look like an OpenRouter key (sk-or-...); nothing saved"
+  mkdir -p -- "$(dirname -- "$KEY_FILE")"
+  ( umask 077; printf 'export OPENROUTER_API_KEY=%q\n' "$key" >"$KEY_FILE" )
+  chmod 600 -- "$KEY_FILE"
+  echo "Saved to $KEY_FILE (mode 600). New shells pick it up; for this one run: source $KEY_FILE"
+  echo "Restart Claude Code from a new shell so it sees the key."
+}
+
+cmd_build() {
+  local here; here=$(dirname -- "$(realpath -- "$0")")
+  podman build --pull=newer -t "$IMAGE" "$@" "$here/../image" && podman image prune -f >/dev/null
+}
+
+case ${1:-} in
+  run|apply|clean|list|log|model|build) cmd=$1; shift; "cmd_$cmd" "$@" ;;
+  set-key) shift; cmd_set_key "$@" ;;
+  *) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 2 ;;
+esac

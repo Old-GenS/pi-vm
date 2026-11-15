@@ -1,0 +1,18 @@
+# pi-vm defaults. Copy to ~/.config/pi-vm/config and edit. Everything here can also be set as an
+# environment variable, and `pi-vm run --model ID --thinking LEVEL` overrides it for one run.
+
+# Any OpenRouter model ID (https://openrouter.ai/models). Check one with: pi-vm model <id>
+PI_VM_MODEL=xiaomi/mimo-v2.6-flash
+
+# off | minimal | low | medium | high | xhigh
+PI_VM_THINKING=low
+
+# OpenRouter provider routing, sent as-is as the request's "provider" field
+# (https://openrouter.ai/docs/guides/routing/provider-selection). The default skips fp4/int4
+# endpoints. {} lets OpenRouter pick any endpoint.
+PI_VM_ROUTING='{"quantizations":["fp16","bf16","fp8"]}'
+
+# VM size and time limit
+# PI_VM_MEMORY=2g
+# PI_VM_CPUS=2
+# PI_VM_TIMEOUT_MIN=90
