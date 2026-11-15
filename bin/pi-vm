@@ -82,21 +82,24 @@ models_json() {
 # uncached (in a 36-minute test run, 3 moves were 70% of the fresh input tokens). So pi-vm ranks
 # the model's providers once, before the run, and sends that fixed order: the first one serves every
 # call, and the next ones are used only when it fails. Ranked: up now, supports tools and caching,
-# an allowed quantization, then most reliable over the last day, then cheapest. A PI_VM_ROUTING
-# that names providers itself (order or only) is used as is.
+# an allowed quantization; then the model maker's own endpoint first (xiaomi/* for a xiaomi/
+# model: in tests it held its cache across a whole run, where a reseller missed it internally),
+# then most reliable over the last day, then cheapest. A PI_VM_ROUTING that names providers itself
+# (order or only) is used as is.
 routing_for() {
   local model=$1 eps
   if jq -e 'has("order") or has("only")' <<<"$ROUTING" >/dev/null; then echo "$ROUTING"; return; fi
   eps=$(curl -fsS --max-time 20 "https://openrouter.ai/api/v1/models/$model/endpoints") \
     || { echo "pi-vm: couldn't list providers for $model; letting OpenRouter choose" >&2; echo "$ROUTING"; return; }
-  jq -c --argjson r "$ROUTING" '
+  jq -c --argjson r "$ROUTING" --arg maker "${model%%/*}" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[]
        | select((.status // 0) == 0)
        | select($q == null or (.quantization as $x | $q | index($x)))
        | select((.supported_parameters // []) | index("tools"))
        | select(.pricing.input_cache_read != null)]
-    | sort_by(-((.uptime_last_1d // 0) | floor), (.pricing.prompt | tonumber))
+    | sort_by((.tag | split("/")[0] | ascii_downcase) != ($maker | ascii_downcase),
+              -((.uptime_last_1d // 0) | floor), (.pricing.prompt | tonumber))
     | map(.tag) as $order
     | if ($order | length) == 0 then $r else $r + {order: $order, allow_fallbacks: true} end' <<<"$eps"
 }

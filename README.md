@@ -45,8 +45,9 @@ the clone, so pi can't edit it mid-run.
 each keeps its own prompt cache. Left alone, OpenRouter moves a model between providers mid-run,
 and every move re-sends the whole history uncached: in a 36-minute test run, three moves were 70%
 of the fresh input tokens and doubled the cost. So before each run pi-vm ranks the model's
-providers (up now, supports tools and caching, an allowed quantization, then the most reliable over
-the last day, then the cheapest) and sends that fixed order: the first serves every call, and the
+providers (up now, supports tools and caching, an allowed quantization; then the model maker's own
+endpoint, such as Xiaomi's for MiMo, which held its cache across whole runs where a reseller
+missed it internally; then the most reliable over the last day, then the cheapest) and sends that fixed order: the first serves every call, and the
 next are used only if it fails. The run prints the order, and `run.json` keeps it. By default only
 fp16/bf16/fp8 endpoints qualify, skipping fp4/int4 ones that are cheaper but worse at long
 agentic runs. Set `PI_VM_ROUTING` to change that; a value with its own `order` or `only` is used
