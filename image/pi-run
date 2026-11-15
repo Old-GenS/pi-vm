@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
-# Runs inside the VM: pi in JSON-event mode on /work, with the raw events kept in
+# Runs inside the VM: pi in JSON-event mode on /work, with the events kept in
 # .handoff/events.jsonl and a readable log on stdout. pi's JSON mode always exits 0, so the exit
 # status comes from how the last assistant message ended.
+#
+# pi streams each reply as message_update events that each carry the whole message so far, so a
+# long run's stream grows to gigabytes (1.5 GB in a 36-minute test). Those and tool progress
+# updates are dropped before anything is kept or rendered: every finished message and tool result
+# still arrives in its own *_end event.
 set -uo pipefail
 mkdir -p /work/.handoff
 events=/work/.handoff/events.jsonl
 
 no-ipv6 pi --mode json --no-session --provider openrouter \
   --model "$PI_VM_MODEL" --thinking "$PI_VM_THINKING" "$1" 2>&1 \
+  | grep --line-buffered -v -E '^\{"type":"(message_update|tool_execution_update)"' \
   | tee "$events" | jq --unbuffered -rR -f /usr/local/share/pi-vm/render.jq
 status=${PIPESTATUS[0]}
 
-summary=$(jq -rRs -f /usr/local/share/pi-vm/summary.jq "$events")
-echo "$summary"
-if (( status == 0 )) && grep -q '^pi-vm: run failed' <<<"$summary"; then status=1; fi
+# One small line per model call, then the totals; nothing holds the whole stream in memory.
+if summary=$(jq -cR 'fromjson? | select(.type == "message_end" and .message.role == "assistant")
+               | .message | {usage, stopReason, errorMessage}' "$events" \
+             | jq -rs -f /usr/local/share/pi-vm/summary.jq); then
+  echo "$summary"
+  if (( status == 0 )) && grep -q '^pi-vm: run failed' <<<"$summary"; then status=1; fi
+else
+  echo "pi-vm: couldn't total the run's usage (see .handoff/events.jsonl)"
+fi
 exit "$status"

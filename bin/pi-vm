@@ -61,7 +61,7 @@ model_info() {
 # so pi-vm always describes the model itself, from OpenRouter's own metadata (prices in $/M tokens,
 # so pi's cost totals are right).
 models_json() {
-  jq -n --argjson m "$1" --argjson routing "$ROUTING" '
+  jq -n --argjson m "$1" --argjson routing "$2" '
     def per_m: ((. // "0") | tonumber) * 1000000;
     { providers: { openrouter: { models: [ {
         id: $m.id,
@@ -75,6 +75,30 @@ models_json() {
                 cacheWrite: ($m.pricing.input_cache_write | per_m) },
         compat: ({ openRouterRouting: $routing } | if $routing == {} then {} else . end)
     } ] } } }'
+}
+
+# The OpenRouter routing for one run. Each upstream provider keeps its own prompt cache, and left to
+# itself OpenRouter moves a model between providers mid-run; every move re-sends the whole history
+# uncached (in a 36-minute test run, 3 moves were 70% of the fresh input tokens). So pi-vm ranks
+# the model's providers once, before the run, and sends that fixed order: the first one serves every
+# call, and the next ones are used only when it fails. Ranked: up now, supports tools and caching,
+# an allowed quantization, then most reliable over the last day, then cheapest. A PI_VM_ROUTING
+# that names providers itself (order or only) is used as is.
+routing_for() {
+  local model=$1 eps
+  if jq -e 'has("order") or has("only")' <<<"$ROUTING" >/dev/null; then echo "$ROUTING"; return; fi
+  eps=$(curl -fsS --max-time 20 "https://openrouter.ai/api/v1/models/$model/endpoints") \
+    || { echo "pi-vm: couldn't list providers for $model; letting OpenRouter choose" >&2; echo "$ROUTING"; return; }
+  jq -c --argjson r "$ROUTING" '
+    ($r.quantizations // null) as $q
+    | [.data.endpoints[]
+       | select((.status // 0) == 0)
+       | select($q == null or (.quantization as $x | $q | index($x)))
+       | select((.supported_parameters // []) | index("tools"))
+       | select(.pricing.input_cache_read != null)]
+    | sort_by(-((.uptime_last_1d // 0) | floor), (.pricing.prompt | tonumber))
+    | map(.tag) as $order
+    | if ($order | length) == 0 then $r else $r + {order: $order, allow_fallbacks: true} end' <<<"$eps"
 }
 
 cmd_run() {
@@ -92,6 +116,7 @@ cmd_run() {
   local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
   [[ -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"
   local info; info=$(model_info "$model")
+  local routing; routing=$(routing_for "$model")
 
   local dir; dir="$RUNS/$(basename -- "$repo")-$(date +%Y%m%d-%H%M%S)"
   mkdir -p -- "$RUNS"
@@ -103,12 +128,13 @@ cmd_run() {
   # Outside the clone, so pi can't edit its own model config mid-run.
   local agent_dir="$dir.pi"
   mkdir -p -- "$agent_dir"
-  models_json "$info" >"$agent_dir/models.json"
-  jq -n --arg model "$model" --arg thinking "$thinking" --argjson routing "$ROUTING" \
+  models_json "$info" "$routing" >"$agent_dir/models.json"
+  jq -n --arg model "$model" --arg thinking "$thinking" --argjson routing "$routing" \
     '{model: $model, thinking: $thinking, routing: $routing}' >"$dir/.handoff/run.json"
 
   echo "$dir"
   echo "pi-vm: model $model, thinking $thinking"
+  jq -r 'if .order then "pi-vm: providers, in order: \(.order | join(", "))" else empty end' <<<"$routing"
   local status=0 started=$SECONDS
   podman run --rm --runtime "$RUNTIME" --memory "$MEMORY" --cpus "$CPUS" \
     --timeout "$((TIMEOUT_MIN * 60))" --name "pi-vm-$(basename -- "$dir")" \

@@ -41,16 +41,24 @@ for the chosen model from OpenRouter's own metadata (context size, max output, p
 on OpenRouter works, and pi's cost totals are right. The file lives next to the run dir, outside
 the clone, so pi can't edit it mid-run.
 
-**Routing.** OpenRouter serves most open models from several upstream providers, at different
-quantizations. By default pi-vm asks for fp16/bf16/fp8 only, skipping fp4/int4 endpoints that are
-cheaper but worse at long agentic runs. Set `PI_VM_ROUTING` to change that (`{}` for any endpoint).
+**Routing and caching.** OpenRouter serves most open models from several upstream providers, and
+each keeps its own prompt cache. Left alone, OpenRouter moves a model between providers mid-run,
+and every move re-sends the whole history uncached: in a 36-minute test run, three moves were 70%
+of the fresh input tokens and doubled the cost. So before each run pi-vm ranks the model's
+providers (up now, supports tools and caching, an allowed quantization, then the most reliable over
+the last day, then the cheapest) and sends that fixed order: the first serves every call, and the
+next are used only if it fails. The run prints the order, and `run.json` keeps it. By default only
+fp16/bf16/fp8 endpoints qualify, skipping fp4/int4 ones that are cheaper but worse at long
+agentic runs. Set `PI_VM_ROUTING` to change that; a value with its own `order` or `only` is used
+as is.
 
 ## Logs and cost
 
-pi runs in JSON-event mode. The raw events go to `.handoff/events.jsonl` in the run dir; a readable
-log (commands run, files edited, the model's messages, tool errors) goes to
+pi runs in JSON-event mode. The events go to `.handoff/events.jsonl` in the run dir (without pi's
+token-by-token streaming updates, which would make it gigabytes); a readable log (commands run, files edited, the model's messages, tool errors) goes to
 `.handoff/last-run.log`, which `pi-vm log` follows live. The log ends with the number of model
-calls, tokens (fresh, cached and output) and the cost of the run. pi's JSON mode always exits 0,
+calls, tokens (fresh, cached and output), the share of input served from the cache, any calls
+that missed the cache entirely, and the cost of the run. pi's JSON mode always exits 0,
 so pi-vm exits non-zero when the last model call ended in an error.
 
 ## What the VM can and cannot reach
