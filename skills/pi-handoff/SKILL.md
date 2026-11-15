@@ -137,7 +137,7 @@ background limit of 30 minutes would kill a long run early). Add `--model <id>` 
 (with `.handoff/`) into a new run dir, prints its path first and the model second, and writes the
 readable log to `<run dir>/.handoff/last-run.log` (raw events in `events.jsonl`):
 
-    pi-vm run "Implement .handoff/plan.md exactly as written. Before you finish, write .handoff/report.md listing files changed, commands run and their results, anything you could not do, and the exact next step. If a step is wrong or impossible, stop and report instead of improvising. Do not commit, push, or switch branches."
+    pi-vm run "Implement .handoff/plan.md. If a detail in the plan turns out to be wrong (a file or name that already exists, a number or tolerance the result cannot meet, a command that fails as written), make the smallest fix that keeps the plan's goal, never by deleting or rewriting a file the plan does not list, and keep going. Stop and report only if the goal itself cannot be reached. Before you finish, write .handoff/report.md listing files changed, commands run and their results, every deviation from the plan with its reason under a Deviations heading, anything you could not do, and the exact next step. Do not commit, push, or switch branches."
 
 Right after starting it, read the background command's output once to get the run dir (its first
 line; it appears within a few seconds). Tell the user the executor is running in a microVM, which
@@ -154,7 +154,8 @@ When the run finishes, take the run dir from the first line of the command's out
 below runs in the run dir (`git -C <run dir> ...`, or commands with that working directory), not in
 the repo:
 
-- Read `<run dir>/.handoff/report.md`. If it is missing, read the end of
+- Read `<run dir>/.handoff/report.md`, its **Deviations** first: judge each one (keep it, or fix it
+  in review) and list them all in your report. If it is missing, read the end of
   `<run dir>/.handoff/last-run.log`. The log's last lines give the token and cost totals and how
   the run ended.
 - If the output says `timed out after N minutes`, the VM was stopped mid-run: say so first in the
