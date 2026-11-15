@@ -96,6 +96,23 @@ Write `.handoff/plan.md` with exactly these sections:
   quick one-off check in a project without one, point it at the system Chromium:
   `executablePath: '/usr/lib64/chromium-browser/chromium-browser'`.
 
+Then check the plan's facts. A small executor follows the plan literally and stops at the first
+fact that is wrong, so every wrong fact costs a run; check them here, where they cost nothing:
+
+- **Files.** Every file marked "(new)" must not exist yet, and every other file in **Files to
+  touch** must exist: run `ls` on each. Grep the repo for every new name the plan introduces (a
+  module, a function, an env var, a song id) and make sure nothing already uses it.
+- **Numbers.** Every expected value in a test or an Acceptance line (a measurement, a tolerance, a
+  count, a checksum) comes from running something, never from reasoning: write the smallest
+  reference version in a `mktemp -d` directory, run it on the plan's exact inputs, and copy the
+  number and a tolerance with room into the plan. Delete the directory afterwards.
+- **Each check can fail.** For every Acceptance line, name one wrong result it would catch. A check
+  that passes on broken work is useless (e.g. `git status` cannot tell whether an untracked file's
+  content changed: compare checksums instead). A check over changed files always excludes the
+  handoff's own folder: `git status --porcelain -- . ':(exclude).handoff'`.
+- **Scope.** Keep one plan to one deliverable. A plan that designs, builds, tunes and documents in
+  one run has more facts to get wrong and costs more when it stops; split it into runs.
+
 Then check the **Acceptance** commands, before the executor spends anything on them. The code does
 not exist yet, so this tests the command, not the result:
 
