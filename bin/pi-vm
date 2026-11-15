@@ -118,6 +118,11 @@ cmd_run() {
   [[ -n ${OPENROUTER_API_KEY:-} ]] || die "OPENROUTER_API_KEY is not set (run: pi-vm set-key)"
   local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
   [[ -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"
+  # The plan's Files to touch must match the repo (no "(new)" file that exists, no listed file
+  # that doesn't) before anything runs; see skills/pi-handoff/check-plan.sh.
+  local here; here=$(dirname -- "$(realpath -- "$0")")
+  (cd -- "$repo" && bash "$here/../skills/pi-handoff/check-plan.sh") \
+    || die "the plan check failed; fix .handoff/plan.md before running"
   local info; info=$(model_info "$model")
   local routing; routing=$(routing_for "$model")
 
