@@ -178,11 +178,7 @@ verification disagree, say so plainly.
 
 Give the run dir path and ask whether to apply the changes to the repo.
 
-Small problems you fix yourself, in the run dir, before reporting: a failing check with an obvious
-cause, a deviation you disagree with, a wrong name or number, a missing doc line. Then re-run the
-Acceptance commands and list each fix in the report. If the executor stopped partway, finish the
-remaining steps yourself the same way when they are small. Re-run the executor only for large
-missing work, and re-plan only when the goal itself was wrong; say which and why.
+Do not re-plan, patch, or fix failures yourself unless the user asks.
 
 ## 6. Apply or clean (only when the user says so)
 
