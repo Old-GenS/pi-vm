@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # pi-vm: run a pi handoff inside a microVM, on a throwaway clone of the repo.
 #
-#   pi-vm run [--model ID] [--thinking LEVEL] "<prompt>"
+#   pi-vm run [--model ID] [--thinking LEVEL] [--routing JSON] "<prompt>"
 #                           clone the repo (plus .handoff/) and run pi in a VM; prints the run dir
 #   pi-vm apply <run-dir>   copy the run's changes into the repo as uncommitted changes
 #   pi-vm clean <run-dir>   delete a run (or --all)
@@ -17,8 +17,17 @@
 set -euo pipefail
 
 CONFIG=${PI_VM_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pi-vm/config}
+# Precedence: run flags, then PI_VM_* environment variables, then the config file, then the
+# defaults below. The config sets plain variables, so keep any PI_VM_* already in the environment
+# and put them back after sourcing it.
+env_vars=
+vars=("${!PI_VM_@}")
+(( ${#vars[@]} )) && env_vars=$(declare -p "${vars[@]}")
+unset vars
 # shellcheck disable=SC1090
 [[ -f $CONFIG ]] && source "$CONFIG"
+eval "$env_vars"
+unset env_vars
 
 MODEL=${PI_VM_MODEL:-xiaomi/mimo-v2.6-flash}   # an OpenRouter model ID
 THINKING=${PI_VM_THINKING:-low}                # off|minimal|low|medium|high|xhigh
@@ -91,6 +100,17 @@ routing_for() {
   if jq -e 'has("order") or has("only")' <<<"$ROUTING" >/dev/null; then echo "$ROUTING"; return; fi
   eps=$(curl -fsS --max-time 20 "https://openrouter.ai/api/v1/models/$model/endpoints") \
     || { echo "pi-vm: couldn't list providers for $model; letting OpenRouter choose" >&2; echo "$ROUTING"; return; }
+  # A quantization filter that rules out every endpoint would only fail at the first model call,
+  # with a 404 that doesn't say why; free and preview endpoints often report "unknown".
+  local unmatched
+  unmatched=$(jq -r --argjson r "$ROUTING" '
+    ($r.quantizations // null) as $q
+    | [.data.endpoints[] | select((.status // 0) == 0)] as $up
+    | if $q == null or ($up | length) == 0
+        or any($up[]; .quantization as $x | $q | index($x)) then empty
+      else "\($q | join(", ")) (it has: \([$up[] | "\(.tag)=\(.quantization // "unknown")"] | join(", ")))"
+      end' <<<"$eps")
+  [[ -z $unmatched ]] || die "no endpoint of $model allows quantizations $unmatched; rerun with --routing '{}' to allow any"
   jq -c --argjson r "$ROUTING" --arg maker "${model%%/*}" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[]
@@ -110,11 +130,13 @@ cmd_run() {
     case $1 in
       --model) model=${2:?--model needs an OpenRouter model ID}; shift 2 ;;
       --thinking) thinking=${2:?--thinking needs a level}; shift 2 ;;
+      --routing) ROUTING=${2:?--routing needs a JSON object}; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
   local prompt=${1:?prompt required}
   case $thinking in off|minimal|low|medium|high|xhigh) ;; *) die "bad --thinking: $thinking" ;; esac
+  jq -e 'type == "object"' <<<"$ROUTING" >/dev/null 2>&1 || die "bad routing (not a JSON object): $ROUTING"
   [[ -n ${OPENROUTER_API_KEY:-} ]] || die "OPENROUTER_API_KEY is not set (run: pi-vm set-key)"
   local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
   [[ -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"

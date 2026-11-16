@@ -34,6 +34,10 @@ pi-vm model qwen/qwen3-coder                  # check a model exists, and its pr
 pi-vm run --model qwen/qwen3-coder --thinking medium "<prompt>"
 ```
 
+Settings are taken in this order: `pi-vm run` flags, then `PI_VM_*` environment variables, then the
+config file, then the built-in defaults. So `PI_VM_ROUTING='{}' pi-vm run ...` works even when the
+config sets `PI_VM_ROUTING`.
+
 In Claude Code, just say which model: "hand it off to pi with kimi". The skill finds the exact ID.
 
 pi's built-in model list lags behind OpenRouter, so for every run pi-vm writes pi a `models.json`
@@ -50,8 +54,14 @@ endpoint, such as Xiaomi's for MiMo, which held its cache across whole runs wher
 missed it internally; then the most reliable over the last day, then the cheapest) and sends that fixed order: the first serves every call, and the
 next are used only if it fails. The run prints the order, and `run.json` keeps it. By default only
 fp16/bf16/fp8 endpoints qualify, skipping fp4/int4 ones that are cheaper but worse at long
-agentic runs. Set `PI_VM_ROUTING` to change that; a value with its own `order` or `only` is used
-as is.
+agentic runs. Set `PI_VM_ROUTING`, or pass `--routing '<json>'` for one run, to change that; a
+value with its own `order` or `only` is used as is. If the quantization filter rules out every
+endpoint a model has (free and preview endpoints often report `unknown`), the run stops before it
+starts and lists each endpoint's quantization; `pi-vm run --routing '{}' ...` allows any:
+
+```bash
+pi-vm run --model baidu/ernie-5.5-flash-preview:free --routing '{}' "<prompt>"
+```
 
 ## Logs and cost
 

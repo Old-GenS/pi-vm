@@ -28,6 +28,10 @@ Claude Code from a new shell.
   confirm it exists with `pi-vm model <id>`; that also shows its price. If the name matches several
   models, ask which one. Pass it as `--model <id>`. Pass `--thinking <level>` only if the user
   asks for one (off, minimal, low, medium, high, xhigh).
+- If `pi-vm run` stops with "no endpoint of <model> allows quantizations ...", the model's
+  endpoints (often free or preview ones) report a quantization the config's routing filter skips.
+  Tell the user, and with their go-ahead rerun with `--routing '{}'` (before the prompt), which
+  lets OpenRouter pick any endpoint. Use the same `--routing` on every rerun of that plan.
 - A rerun of the same plan uses the same model and thinking level as the run before, unless the
   user asks to switch. Switching throws away the prompt cache and the comparison.
 
@@ -129,7 +133,7 @@ not exist yet, so this tests the command, not the result:
 From the top-level directory, run the EXECUTOR with the Bash tool, `run_in_background: true` and
 `timeout: 6000000` (100 minutes: pi-vm stops the VM itself at 90, and the Bash tool's default
 background limit of 30 minutes would kill a long run early). Add `--model <id>` (and
-`--thinking <level>`) before the prompt only when the Model section says to. pi-vm clones the repo
+`--thinking <level>` or `--routing <json>`) before the prompt only when the Model section says to. pi-vm clones the repo
 (with `.handoff/`) into a new run dir, prints its path first and the model second, and writes the
 readable log to `<run dir>/.handoff/last-run.log` (raw events in `events.jsonl`):
 
