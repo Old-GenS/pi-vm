@@ -1,7 +1,7 @@
 ---
 name: pi-handoff
 description: Write an execution spec to .handoff/plan.md, run it with pi (the pi.dev coding agent) on an OpenRouter model with full access inside a throwaway microVM on a clone of the repo, verify and review the result, report, and apply the changes to the repo when the user approves. Use when the user says "hand it off to pi", "use pi", "pi-vm", "run it with mimo" or names another OpenRouter model to run a handoff ("hand it off with qwen/kimi/glm/gpt"). For "hand off" or "use dsh/deepseek" with no pi or model named, use the handoff skill (dsh) instead.
-allowed-tools: Read, Glob, Grep, Write, Bash(pi-vm:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git -C:*), Bash(bash ~/.claude/skills/pi-handoff/check-plan.sh)
+allowed-tools: Read, Glob, Grep, Write, Bash(pi-vm:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git -C:*)
 ---
 
 Do not implement anything yourself. You plan, the executor implements, you verify.
@@ -84,9 +84,6 @@ Write `.handoff/plan.md` with exactly these sections:
     ## Out of scope
     ## If blocked
 
-- **Files to touch** is a list with one file per line, its path in backticks first:
-  `` - `path/to/file.ts` ``. A file the plan creates ends in `(new)`:
-  `` - `path/to/new-file.ts` (new) ``. No globs, no folders, no "and similar files".
 - Decisions only — no reasoning, no alternatives, no hedges. Assume the executor has none of this
   conversation: name exact file paths, function names, commands, and versions. The executor may be
   a small, cheap model: make every step concrete enough that it cannot misread it, and order the
@@ -103,16 +100,6 @@ Write `.handoff/plan.md` with exactly these sections:
   (`npx playwright install chromium` is fine; browser downloads are cached between runs). For a
   quick one-off check in a project without one, point it at the system Chromium:
   `executablePath: '/usr/lib64/chromium-browser/chromium-browser'`.
-
-Then run the plan check from the top-level directory. It must pass before the executor runs
-(`pi-vm run` runs it too and refuses a failing plan):
-
-    bash ~/.claude/skills/pi-handoff/check-plan.sh
-
-It fails if a Files to touch entry is not a tracked file (and not marked `(new)`), or if a `(new)`
-file already exists. It warns about repo paths in backticks elsewhere in the plan that are not
-tracked files; check each warning. Fix the plan and run it again; never start the executor on a
-failing plan.
 
 Then check the **Acceptance** commands, before the executor spends anything on them. The code does
 not exist yet, so this tests the command, not the result:
