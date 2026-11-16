@@ -23,6 +23,21 @@ Claude Code (host) ── reviews the diff in the run dir, runs Acceptance there
       └─ pi-vm apply ─▶ changes land in your repo as uncommitted changes → you commit
 ```
 
+## Brief mode
+
+When the work has no checkable definition of done — a song, a design pass, a rewrite — skip the
+plan:
+
+```bash
+pi-vm brief "Write a 16-bar lofi song in D minor at 88 BPM, save it as src/songs/foo.song"
+```
+
+Same VM, same clone, same `apply`. The brief goes straight to pi with no `## Files to touch`, no
+Acceptance list and no scope check; it uses its own judgement and writes a short note to
+`.handoff/report.md`. You review the diff the same way.
+
+Use `run` when there is something to test. Use `brief` when the only test is your own ear.
+
 ## Models
 
 The default is `xiaomi/mimo-v2.6-flash` with thinking `low`. Change it in

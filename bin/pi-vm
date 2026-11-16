@@ -3,6 +3,9 @@
 #
 #   pi-vm run [--model ID] [--thinking LEVEL] [--routing JSON] "<prompt>"
 #                           clone the repo (plus .handoff/) and run pi in a VM; prints the run dir
+#   pi-vm brief [same flags] "<brief>"
+#                           the same VM and clone without a plan: the brief goes straight to pi,
+#                           with no Files to touch, no Acceptance list and no scope check
 #   pi-vm apply <run-dir>   copy the run's changes into the repo as uncommitted changes
 #   pi-vm clean <run-dir>   delete a run (or --all)
 #   pi-vm list              list runs
@@ -134,21 +137,31 @@ routing_for() {
 }
 
 cmd_run() {
-  local model=$MODEL thinking=$THINKING
+  local model=$MODEL thinking=$THINKING mode=plan
   while [[ ${1:-} == --* ]]; do
     case $1 in
       --model) model=${2:?--model needs an OpenRouter model ID}; shift 2 ;;
       --thinking) thinking=${2:?--thinking needs a level}; shift 2 ;;
       --routing) ROUTING=${2:?--routing needs a JSON object}; shift 2 ;;
+      --brief) mode=brief; shift ;;
       *) die "unknown option $1" ;;
     esac
   done
   local prompt=${1:?prompt required}
+  if [[ $mode == brief ]]; then
+    prompt="Work from the brief below. The repository is checked out at /work; do the work there.
+
+$prompt
+
+There is no plan and no acceptance test to satisfy. Use your own judgement about what to
+change. When you have finished, write a short note to .handoff/report.md saying what you made,
+what you checked, and anything you left undone."
+  fi
   case $thinking in off|minimal|low|medium|high|xhigh) ;; *) die "bad --thinking: $thinking" ;; esac
   jq -e 'type == "object"' <<<"$ROUTING" >/dev/null 2>&1 || die "bad routing (not a JSON object): $ROUTING"
   [[ -n ${OPENROUTER_API_KEY:-} ]] || die "OPENROUTER_API_KEY is not set (run: pi-vm set-key)"
   local repo; repo=$(git rev-parse --show-toplevel) || die "not in a git repo"
-  [[ -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"
+  [[ $mode == brief || -f $repo/.handoff/plan.md ]] || die "$repo/.handoff/plan.md not found"
   local info; info=$(model_info "$model")
   local routing; routing=$(routing_for "$model")
 
@@ -157,14 +170,15 @@ cmd_run() {
   # --no-hardlinks: the VM must not be able to reach the repo's object files.
   git clone -q --no-hardlinks -- "$repo" "$dir"
   git -C "$dir" remote remove origin
-  cp -a -- "$repo/.handoff/." "$dir/.handoff/"
+  mkdir -p -- "$dir/.handoff"
+  if [[ -d $repo/.handoff ]]; then cp -a -- "$repo/.handoff/." "$dir/.handoff/"; fi
   rm -f -- "$dir/.handoff/"{report.md,last-run.log,events.jsonl,run.json}
   # Outside the clone, so pi can't edit its own model config mid-run.
   local agent_dir="$dir.pi"
   mkdir -p -- "$agent_dir"
   models_json "$info" "$routing" >"$agent_dir/models.json"
-  jq -n --arg model "$model" --arg thinking "$thinking" --argjson routing "$routing" \
-    '{model: $model, thinking: $thinking, routing: $routing}' >"$dir/.handoff/run.json"
+  jq -n --arg model "$model" --arg thinking "$thinking" --arg mode "$mode" --argjson routing "$routing" \
+    '{model: $model, thinking: $thinking, mode: $mode, routing: $routing}' >"$dir/.handoff/run.json"
 
   echo "$dir"
   echo "pi-vm: model $model, thinking $thinking"
@@ -272,6 +286,7 @@ cmd_update() {
 
 case ${1:-} in
   run|apply|clean|list|log|model|build|update) cmd=$1; shift; "cmd_$cmd" "$@" ;;
+  brief) shift; cmd_run --brief "$@" ;;
   set-key) shift; cmd_set_key "$@" ;;
-  *) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,18s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac
