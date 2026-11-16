@@ -113,6 +113,24 @@ file already exists. It warns about repo paths in backticks elsewhere in the pla
 tracked files; check each warning. Fix the plan and run it again; never start the executor on a
 failing plan.
 
+The plan check only checks paths. Then check every fact the plan states against the repo, since a
+wrong fact either stops a literal executor or pushes it into a workaround, and costs a run:
+
+- **Values:** every number, range, name or setting the plan gives comes from the repo, not from
+  general knowledge: an instrument's range from its comment in the source or docs plus an existing
+  file that uses it (does it sound an octave below the written note?), a threshold from running
+  the check on an existing example, a name from the list that must accept it.
+- **Checks:** every check the plan relies on behaves as the plan assumes. Run it on an existing
+  example (does the checker accept that chord symbol, that role, that format?), and look for a
+  test that the planned change would break (a list of allowed names, a count, a snapshot).
+- **No contradictions:** no two requirements fight each other or the checks (a style that needs
+  extensions against a zero off-chord rule, a range against what the instrument plays), and no
+  escape hatch (`# ok` lines, opt-out comments, renaming a role) makes a check pass without the
+  work. Cap or forbid each one in the plan.
+
+Before starting the executor, list in your message each fact checked and where it came from
+(file and line, or the command run), so the user can catch a wrong one before it costs a run.
+
 Then check the **Acceptance** commands, before the executor spends anything on them. The code does
 not exist yet, so this tests the command, not the result:
 
