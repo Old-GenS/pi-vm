@@ -85,9 +85,8 @@ Write `.handoff/plan.md` with exactly these sections:
     ## If blocked
 
 - Decisions only — no reasoning, no alternatives, no hedges. Assume the executor has none of this
-  conversation: name exact file paths, function names, commands, and versions. The executor may be
-  a small, cheap model: make every step concrete enough that it cannot misread it, and order the
-  steps so each one can be checked before the next.
+  conversation: name exact file paths, function names, commands, and versions. Order the steps so
+  each one can be checked before the next.
 - **Acceptance** is a list of runnable commands, each with its expected result (e.g. `npm test`
   exits 0; `node greet.js` prints `hello`). No prose-only criteria.
 - **Constraints** always includes: do not commit, push, or switch branches. A step may touch a
