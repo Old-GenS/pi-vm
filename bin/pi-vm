@@ -101,16 +101,25 @@ routing_for() {
   eps=$(curl -fsS --max-time 20 "https://openrouter.ai/api/v1/models/$model/endpoints") \
     || { echo "pi-vm: couldn't list providers for $model; letting OpenRouter choose" >&2; echo "$ROUTING"; return; }
   # A quantization filter that rules out every endpoint would only fail at the first model call,
-  # with a 404 that doesn't say why; free and preview endpoints often report "unknown".
-  local unmatched
-  unmatched=$(jq -r --argjson r "$ROUTING" '
+  # with a 404 that doesn't say why. Free and preview endpoints often report "unknown": that is
+  # not a known fp4/int4 endpoint, so when every endpoint is unknown the filter is dropped for this
+  # run. When some report a quantization the filter skips, the run stops instead.
+  local quant
+  quant=$(jq -r --argjson r "$ROUTING" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[] | select((.status // 0) == 0)] as $up
     | if $q == null or ($up | length) == 0
-        or any($up[]; .quantization as $x | $q | index($x)) then empty
+        or any($up[]; .quantization as $x | $q | index($x)) then "ok"
+      elif all($up[]; (.quantization // "unknown") == "unknown") then "unknown"
       else "\($q | join(", ")) (it has: \([$up[] | "\(.tag)=\(.quantization // "unknown")"] | join(", ")))"
       end' <<<"$eps")
-  [[ -z $unmatched ]] || die "no endpoint of $model allows quantizations $unmatched; rerun with --routing '{}' to allow any"
+  case $quant in
+    ok) ;;
+    unknown)
+      echo "pi-vm: $model's endpoints don't report a quantization; allowing any for this run" >&2
+      ROUTING=$(jq -c 'del(.quantizations)' <<<"$ROUTING") ;;
+    *) die "no endpoint of $model allows quantizations $quant; rerun with --routing '{}' to allow any" ;;
+  esac
   jq -c --argjson r "$ROUTING" --arg maker "${model%%/*}" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[]
