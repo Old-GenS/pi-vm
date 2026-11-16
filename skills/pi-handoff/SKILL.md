@@ -20,6 +20,20 @@ If `pi-vm` is not installed, or podman/krun is unavailable, say so and stop. If
 `OPENROUTER_API_KEY` is not set, tell the user to run `pi-vm set-key` in a terminal and restart
 Claude Code from a new shell.
 
+## Brief mode (no plan)
+
+When the work has no checkable definition of done — a song, a design pass, a rewrite — do not write
+a plan at all. Run:
+
+    pi-vm brief [--model ID] [--thinking LEVEL] "<the brief>"
+
+No `.handoff/plan.md` is needed or read; there is no Files to touch, no Acceptance list and no
+scope check. pi works in the clone and writes `.handoff/report.md` itself. Then carry on from
+step 4 (verify and review) and step 5 (report).
+
+Use it when the user says "hand it off to pi in brief", "brief mode", or asks for creative work
+with no test to satisfy. Use `run` whenever there is something that can be checked.
+
 ## Model
 
 - Default: whatever `pi-vm model` prints as the default (set in `~/.config/pi-vm/config`, falling
