@@ -205,6 +205,8 @@ cmd_apply() {
   # new files land untracked, as if pi had run in the repo itself.
   git -C "$dir" add -A
   git -C "$dir" diff --cached --binary HEAD -- . ':(exclude).handoff' | git -C "$repo" apply --allow-empty
+  # The repo may have no .handoff/ (brief mode needs no plan), so make it before copying.
+  mkdir -p -- "$repo/.handoff"
   for f in report.md last-run.log; do
     [[ -f $dir/.handoff/$f ]] && cp -- "$dir/.handoff/$f" "$repo/.handoff/$f"
   done
