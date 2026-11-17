@@ -170,14 +170,13 @@ the repo:
   **Files to touch**, and anything **Out of scope**. Passing Acceptance does not end the review.
 - Do not edit any file during verification, except restoring the repo's own checks as below.
 - Before recommending apply, check the run with the repo's own checks, never the executor's copies:
-  1. `git -C <run dir> diff --name-only HEAD -- <the paths the repo uses to judge itself: its test,
-     check and analysis directories and files>` — any file listed is a flag: the executor edited
-     something that judges it.
-  2. `git -C <run dir> checkout HEAD -- <the same paths>` — restores them exactly as they are in the
-     repo. This is the one edit allowed during verification.
-  3. Run the repo's own test and check commands, as the repo documents them (`package.json`,
-     `Makefile`, CONTRIBUTING, or CI config). Report any flag they print that involves a new or
-     changed file. Put the check's raw output underneath.
+  1. `git -C <run dir> diff --name-only HEAD -- tools/check tools/analysis` — any file listed is a
+     flag (the executor edited a check).
+  2. `git -C <run dir> checkout HEAD -- tools/check tools/analysis` — puts the checks back exactly
+     as they are in the repo (the run dir's HEAD is the repo's HEAD), discarding the executor's
+     edits to them. This is the one edit allowed during verification.
+  3. In the run dir, run `npm run check:generators` and `npm run check:songs` (drumline-radio).
+     Any copy `check:generators` lists that involves a new or changed script is a flag.
   Report every flag to the user in plain words before anything else: what the model did, why it
   breaks the repo's rules, and what you recommend (fix it, or drop the run). Every flag is a stop,
   whatever its size; never call one minor. Do not apply until the user answers.
