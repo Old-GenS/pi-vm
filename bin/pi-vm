@@ -35,8 +35,8 @@ unset env_vars
 MODEL=${PI_VM_MODEL:-xiaomi/mimo-v2.6-flash}   # an OpenRouter model ID
 THINKING=${PI_VM_THINKING:-low}                # off|minimal|low|medium|high|xhigh
 # OpenRouter provider routing, sent as-is as the request's "provider" field. The default skips
-# fp4/int4 endpoints, which are cheaper but noticeably worse at long agentic runs. Set to {} to
-# let OpenRouter pick any endpoint.
+# fp4/int4 endpoints, which are cheaper but noticeably worse at long agentic runs, when the model
+# has a better one (see routing_for). Set to {} to let OpenRouter pick any endpoint.
 ROUTING=${PI_VM_ROUTING:-'{"quantizations":["fp16","bf16","fp8"]}'}
 IMAGE=${PI_VM_IMAGE:-localhost/pi-vm:latest}
 RUNTIME=${PI_VM_RUNTIME:-krun}          # set to runc/crun to run as a plain container
@@ -104,25 +104,21 @@ routing_for() {
   eps=$(curl -fsS --max-time 20 "https://openrouter.ai/api/v1/models/$model/endpoints") \
     || { echo "pi-vm: couldn't list providers for $model; letting OpenRouter choose" >&2; echo "$ROUTING"; return; }
   # A quantization filter that rules out every endpoint would only fail at the first model call,
-  # with a 404 that doesn't say why. Free and preview endpoints often report "unknown": that is
-  # not a known fp4/int4 endpoint, so when every endpoint is unknown the filter is dropped for this
-  # run. When some report a quantization the filter skips, the run stops instead.
+  # with a 404 that doesn't say why. The filter is a preference, not a ban: when no endpoint passes
+  # it (free and preview endpoints often report "unknown", and some models are served only in fp4),
+  # it is dropped for this run and the run says which quantizations it allowed.
   local quant
   quant=$(jq -r --argjson r "$ROUTING" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[] | select((.status // 0) == 0)] as $up
     | if $q == null or ($up | length) == 0
         or any($up[]; .quantization as $x | $q | index($x)) then "ok"
-      elif all($up[]; (.quantization // "unknown") == "unknown") then "unknown"
-      else "\($q | join(", ")) (it has: \([$up[] | "\(.tag)=\(.quantization // "unknown")"] | join(", ")))"
+      else [$up[] | "\(.tag)=\(.quantization // "unknown")"] | join(", ")
       end' <<<"$eps")
-  case $quant in
-    ok) ;;
-    unknown)
-      echo "pi-vm: $model's endpoints don't report a quantization; allowing any for this run" >&2
-      ROUTING=$(jq -c 'del(.quantizations)' <<<"$ROUTING") ;;
-    *) die "no endpoint of $model allows quantizations $quant; rerun with --routing '{}' to allow any" ;;
-  esac
+  if [[ $quant != ok ]]; then
+    echo "pi-vm: no endpoint of $model is $(jq -r '.quantizations | join("/")' <<<"$ROUTING") (it has: $quant); allowing any for this run" >&2
+    ROUTING=$(jq -c 'del(.quantizations)' <<<"$ROUTING")
+  fi
   jq -c --argjson r "$ROUTING" --arg maker "${model%%/*}" '
     ($r.quantizations // null) as $q
     | [.data.endpoints[]

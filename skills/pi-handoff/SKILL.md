@@ -42,11 +42,11 @@ with no test to satisfy. Use `run` whenever there is something that can be check
   confirm it exists with `pi-vm model <id>`; that also shows its price. If the name matches several
   models, ask which one. Pass it as `--model <id>`. Pass `--thinking <level>` only if the user
   asks for one (off, minimal, low, medium, high, xhigh).
-- A model whose endpoints all report an `unknown` quantization runs as is: pi-vm drops the
-  quantization filter for that run and prints a note. If `pi-vm run` stops with "no endpoint of
-  <model> allows quantizations ...", its endpoints report quantizations the config's filter skips
-  (such as fp4). Tell the user, and with their go-ahead rerun with `--routing '{}'` (before the
-  prompt), which lets OpenRouter pick any endpoint. Use the same `--routing` on every rerun.
+- A model with no endpoint that passes the config's quantization filter (all `unknown`, or only
+  fp4) runs as is: pi-vm drops the filter for that run and prints "no endpoint of <model> is ...
+  allowing any for this run" with each endpoint's quantization. Mention it in the report when the
+  endpoint is a known low-precision one (fp4, int4). `--routing '<json>'` (before the prompt)
+  overrides the routing for a run; use the same `--routing` on every rerun.
 - A rerun of the same plan uses the same model and thinking level as the run before, unless the
   user asks to switch. Switching throws away the prompt cache and the comparison.
 

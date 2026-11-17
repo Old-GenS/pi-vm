@@ -70,11 +70,10 @@ missed it internally; then the most reliable over the last day, then the cheapes
 next are used only if it fails. The run prints the order, and `run.json` keeps it. By default only
 fp16/bf16/fp8 endpoints qualify, skipping fp4/int4 ones that are cheaper but worse at long
 agentic runs. Set `PI_VM_ROUTING`, or pass `--routing '<json>'` for one run, to change that; a
-value with its own `order` or `only` is used as is. Many endpoints, free and preview ones
-especially, report their quantization as `unknown`; when every endpoint of a model does, the run
-drops the filter for that run and says so. When the filter rules out endpoints that do report one
-(say, only fp4), the run stops before it starts and lists each endpoint's quantization; `pi-vm run
---routing '{}' ...` allows any.
+value with its own `order` or `only` is used as is. The filter is a preference: when no endpoint
+of a model passes it (free and preview endpoints often report their quantization as `unknown`, and
+some models are served only in fp4), the run drops the filter for that run and prints each
+endpoint's quantization. A model with both kinds of endpoint still uses only the allowed ones.
 
 ## Logs and cost
 
