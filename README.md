@@ -78,7 +78,7 @@ endpoint's quantization. A model with both kinds of endpoint still uses only the
 ## Logs and cost
 
 pi runs in JSON-event mode. The events go to `.handoff/events.jsonl` in the run dir (without pi's
-token-by-token streaming updates, which would make it gigabytes); a readable log (commands run, files edited, the model's messages, tool errors) goes to
+token-by-token streaming updates, which would make it gigabytes); a readable log (commands run, files edited, the model's thinking and messages, tool errors) goes to
 `.handoff/last-run.log`, which `pi-vm log` follows live. The log ends with the number of model
 calls, tokens (fresh, cached and output), the share of input served from the cache, any calls
 that missed the cache entirely, and the cost of the run. pi's JSON mode always exits 0,

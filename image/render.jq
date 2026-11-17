@@ -7,8 +7,11 @@ def text_of: [.content[]? | select(.type == "text") | .text] | join("\n");
 | if $e.type == "raw" then $e.line
   elif $e.type == "message_end" and $e.message.role == "assistant" then
     ($e.message | text_of) as $t
-    | ([$e.message.content[]? | select(.type == "thinking") | .thinking | length] | add // 0) as $think
-    | [ (if $think > 0 then "· thinking (\($think) chars)" else empty end),
+    | ([$e.message.content[]? | select(.type == "thinking") | .thinking // ""] | join("\n")) as $think
+    | [ (if $think != "" then
+           "· thinking (\($think | length) chars)\n"
+           + ($think | rtrimstr("\n") | split("\n") | map("  ┆ " + .) | join("\n"))
+         else empty end),
         (if $t != "" then "\n" + $t + "\n" else empty end),
         (if $e.message.stopReason == "error" or $e.message.stopReason == "aborted"
          then "!! \($e.message.stopReason): \($e.message.errorMessage // "")" else empty end)
