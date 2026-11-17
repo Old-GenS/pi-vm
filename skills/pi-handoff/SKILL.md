@@ -168,7 +168,6 @@ the repo:
 - Review the code: read the full `git diff` and every new untracked file (`git diff` does not show
   those). Check it against `.handoff/plan.md` for bugs, missing or half-done steps, changes outside
   **Files to touch**, and anything **Out of scope**. Passing Acceptance does not end the review.
-- Do not edit any file during verification, except restoring the repo's own checks as below.
 - Before recommending apply, check the run with the repo's own checks, never the executor's copies:
   1. `git -C <run dir> diff --name-only HEAD -- tools/check tools/analysis` — any file listed is a
      flag (the executor edited a check).
@@ -179,13 +178,11 @@ the repo:
      Any copy `check:generators` lists that involves a new or changed script is a flag.
   Report every flag to the user in plain words before anything else: what the model did, why it
   breaks the repo's rules, and what you recommend (fix it, or drop the run). Every flag is a stop,
-  whatever its size; never call one minor. Do not apply until the user answers.
-- Review the diff. The executor's `report.md` is its account of the work, not the change.
-- Check the diff against the repo's own written rules, as well as the plan: a change can pass every
-  Acceptance item and still break a rule the repo states.
-- Write each finding as: the rule (the repo's stated rule, or the plan item), the change
-  (`file:line`), the raw evidence, and a severity. A **blocker** is anything that breaks a written
-  rule or an Acceptance item; never downgrade one to a note.
+  whatever its size; never call one minor. For example: "Grey Coast's script copies two helpers
+  from First Flight's script instead of using lib.mjs, and the model edited the copy check to hide
+  it. Recommend: don't apply until it's fixed." Put
+  the check's raw output underneath, for reference. Do not apply until the user answers.
+- Do not edit any file during verification.
 
 ## 5. Report
 
