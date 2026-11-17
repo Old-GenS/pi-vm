@@ -266,7 +266,7 @@ cmd_build() {
 # mid-project. update rebuilds with the newest pi on npm, only when it is newer than the image's.
 cmd_update() {
   local latest current
-  latest=$(curl -fsS --max-time 20 https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest | jq -r .version) \
+  latest=$(curl -fsS --max-time 20 https://registry.npmjs.org/@earendil-works/pi-coding-agent/latest | jq -r .version) \
     || die "couldn't reach the npm registry"
   # pi prints its version on stderr.
   current=$(podman run --rm --runtime "$RUNTIME" "$IMAGE" pi --version 2>&1 | tail -n1) || current=
