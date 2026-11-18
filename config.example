@@ -17,4 +17,4 @@ PI_VM_ROUTING='{"quantizations":["fp16","bf16","fp8"]}'
 # VM size and time limit
 # PI_VM_MEMORY=2g
 # PI_VM_CPUS=2
-# PI_VM_TIMEOUT_MIN=90
+# PI_VM_TIMEOUT_MIN=90   # at most 110 when Claude Code runs pi-vm (its Bash limit is 120)

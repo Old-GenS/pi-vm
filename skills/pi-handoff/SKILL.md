@@ -134,8 +134,9 @@ not exist yet, so this tests the command, not the result:
 ## 3. Run the executor
 
 From the top-level directory, run the EXECUTOR with the Bash tool, `run_in_background: true` and
-`timeout: 6000000` (100 minutes: pi-vm stops the VM itself at 90, and the Bash tool's default
-background limit of 30 minutes would kill a long run early). Add `--model <id>` (and
+`timeout: 7200000` (120 minutes, the Bash tool's maximum; its default background limit of 30
+minutes would kill a long run early). pi-vm stops the VM itself after `PI_VM_TIMEOUT_MIN` (90 by
+default); keep that at 110 or less so pi-vm, not the Bash tool, ends a run that runs out of time. Add `--model <id>` (and
 `--thinking <level>` or `--routing <json>`) before the prompt only when the Model section says to. pi-vm clones the repo
 (with `.handoff/`) into a new run dir, prints its path first and the model second, and writes the
 readable log to `<run dir>/.handoff/last-run.log` (raw events in `events.jsonl`):
