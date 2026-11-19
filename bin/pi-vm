@@ -43,6 +43,7 @@ RUNTIME=${PI_VM_RUNTIME:-krun}          # set to runc/crun to run as a plain con
 MEMORY=${PI_VM_MEMORY:-2g}
 CPUS=${PI_VM_CPUS:-2}
 TIMEOUT_MIN=${PI_VM_TIMEOUT_MIN:-90}    # the VM is killed after this many minutes
+STALL_MIN=${PI_VM_STALL_MIN:-15}        # ...or after this many minutes with no file changed (0: off)
 RUNS=${PI_VM_RUNS:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-vm/runs}
 # npm's download cache and ~/.cache, kept between runs (podman volumes) so `npm ci` and
 # Playwright/Puppeteer browser downloads happen once. npm checks every package's hash; a run could
@@ -179,14 +180,38 @@ what you checked, and anything you left undone."
   echo "$dir"
   echo "pi-vm: model $model, thinking $thinking"
   jq -r 'if .order then "pi-vm: providers, in order: \(.order | join(", "))" else empty end' <<<"$routing"
-  local status=0 started=$SECONDS
+  local status=0 started=$SECONDS stalled=0 name; name="pi-vm-$(basename -- "$dir")"
+  local log="$dir/.handoff/last-run.log"
+  # podman runs in the background so the stall watchdog below can stop it. Background jobs
+  # ignore Ctrl+C in a script, so pass it (and TERM) on to the VM.
+  trap 'podman stop -t 5 "$name" >/dev/null 2>&1; exit 130' INT TERM
   podman run --rm --runtime "$RUNTIME" --memory "$MEMORY" --cpus "$CPUS" \
-    --timeout "$((TIMEOUT_MIN * 60))" --name "pi-vm-$(basename -- "$dir")" \
+    --timeout "$((TIMEOUT_MIN * 60))" --name "$name" \
     -e OPENROUTER_API_KEY -e PI_VM_MODEL="$model" -e PI_VM_THINKING="$thinking" \
     -v "$dir:/work:Z" -v "$agent_dir/models.json:/root/.pi/agent/models.json:ro,Z" \
     -v "$NPM_CACHE:/root/.npm" -v "$HOME_CACHE:/root/.cache" -w /work "$IMAGE" \
-    pi-run "$prompt" >"$dir/.handoff/last-run.log" 2>&1 || status=$?
-  if (( status != 0 && SECONDS - started >= TIMEOUT_MIN * 60 )); then
+    pi-run "$prompt" >>"$log" 2>&1 &
+  local pid=$! ticks=0
+  # Stall watchdog: every minute, if no file in the run dir (other than .git and .handoff, where
+  # the log and events keep growing) changed in the last STALL_MIN minutes, the agent is looping
+  # without progress, so stop the VM.
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 5; ticks=$((ticks + 1))
+    (( STALL_MIN > 0 && ticks % 12 == 0 )) || continue
+    kill -0 "$pid" 2>/dev/null || break
+    if [[ -z $(find "$dir" -path "$dir/.git" -prune -o -path "$dir/.handoff" -prune \
+                 -o -newermt "-$STALL_MIN minutes" -print -quit 2>/dev/null) ]]; then
+      stalled=1
+      echo "pi-vm: stalled: no file changed in $STALL_MIN minutes; the VM was stopped" | tee -a "$log"
+      podman stop -t 10 "$name" >/dev/null 2>&1 || true
+      break
+    fi
+  done
+  wait "$pid" || status=$?
+  trap - INT TERM
+  if (( stalled )); then
+    (( status )) || status=124
+  elif (( status != 0 && SECONDS - started >= TIMEOUT_MIN * 60 )); then
     echo "pi-vm: timed out after $TIMEOUT_MIN minutes; the VM was stopped" \
       | tee -a "$dir/.handoff/last-run.log"
   fi

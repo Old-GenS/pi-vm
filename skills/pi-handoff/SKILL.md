@@ -107,7 +107,10 @@ Write `.handoff/plan.md` with exactly these sections:
   file outside **Files to touch** when it has to — the clone lives in a throwaway VM and is
   discarded — but every such file must appear in the report under "outside the plan", one line
   each saying why. Installing dependencies (`npm ci`, `dnf install`) and temporary files outside
-  the repo are fine.
+  the repo are fine. It also always includes: the only checks to run are the **Acceptance**
+  commands; don't write or run extra end-to-end tests, and don't run a script against a server
+  or service the plan doesn't set up for it. If something outside Acceptance fails, note it in
+  the report and finish.
 - The clone has no `node_modules` or other ignored files. If Acceptance needs them, make
   installing them (e.g. `npm ci`) the first step.
 - Browser checks: the VM has `chromium-browser` (headless) and 2 GB of RAM. Ask for one browser at
@@ -150,7 +153,9 @@ model it uses, and both ways to watch it live in a terminal (Ctrl+C stops watchi
     pi-vm log
     tail -f <run dir>/.handoff/last-run.log
 
-Do not poll after that; you will be notified when it exits.
+Do not poll after that; you will be notified when it exits. You don't need to watch for a stuck
+run: pi-vm stops the VM itself when no file in the run dir changes for 15 minutes
+(`PI_VM_STALL_MIN`; 0 turns it off), as well as at the 90-minute limit.
 
 ## 4. Verify and review (read-only)
 
@@ -161,8 +166,10 @@ the repo:
 - Read `<run dir>/.handoff/report.md`. If it is missing, read the end of
   `<run dir>/.handoff/last-run.log`. The log's last lines give the token and cost totals and how
   the run ended.
-- If the output says `timed out after N minutes`, the VM was stopped mid-run: say so first in the
-  report, and treat the run dir as partial work. If it says `run failed`, the model or OpenRouter
+- If the output says `timed out after N minutes` or `stalled: no file changed`, the VM was stopped
+  mid-run: say so first in the report, and treat the run dir as possibly partial work. A stalled
+  run has often finished the work and then looped, so run the Acceptance commands before
+  deciding. If it says `run failed`, the model or OpenRouter
   returned an error: give the error.
 - Run `git status --porcelain` and `git diff --stat` to see what actually changed.
 - Run each **Acceptance** command from the plan and compare against its expected result.
