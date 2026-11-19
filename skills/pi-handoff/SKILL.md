@@ -163,9 +163,11 @@ When the run finishes, take the run dir from the first line of the command's out
 below runs in the run dir (`git -C <run dir> ...`, or commands with that working directory), not in
 the repo:
 
-- Read `<run dir>/.handoff/report.md`. If it is missing, read the end of
-  `<run dir>/.handoff/last-run.log`. The log's last lines give the token and cost totals and how
-  the run ended.
+- Read `<run dir>/.handoff/report.md`. If it is missing, read only the log's status lines, never
+  the model's thinking (the lines starting with `  ┆`): pulling another model's reasoning into this
+  conversation can trip Anthropic's safety filter and end the session for good. Use
+  `grep -v '^  ┆' <run dir>/.handoff/last-run.log | tail -20`; its last lines give the token and
+  cost totals and how the run ended. Never read the whole log or `events.jsonl`.
 - If the output says `timed out after N minutes` or `stalled: no file changed`, the VM was stopped
   mid-run: say so first in the report, and treat the run dir as possibly partial work. A stalled
   run has often finished the work and then looped, so run the Acceptance commands before
