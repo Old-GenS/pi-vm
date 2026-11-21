@@ -90,10 +90,19 @@ so pi-vm exits non-zero when the last model call ended in an error.
 |---|---|
 | A clone of the repo (with `.handoff/`) | Your real checkout and its `.git` |
 | `OPENROUTER_API_KEY` | SSH keys, `gh` token, any git remote: **it cannot push** |
-| The network (OpenRouter, npm, web) | Your home directory and the rest of the host |
-| The npm cache and `~/.cache` (podman volumes) | The host kernel (libkrun gives the VM its own) |
+| The internet (OpenRouter, npm, web) | Your home directory and the rest of the host |
+| This repo's own npm cache and `~/.cache` (podman volumes, one pair per repo) | The host kernel (libkrun gives the VM its own) |
+| | Services on this computer: no gateway or host-address mapping (other LAN machines are still reachable) |
 
 The key is the one secret inside, so give it a **credit limit** in OpenRouter's key settings.
+
+**The run dir is the agent's, so the host never runs git or the agent's code in it.** The agent
+controls the clone's `.git` (hooks, `core.fsmonitor`, filter and diff drivers that host git would
+run) and its scripts. `pi-vm diff` and `pi-vm apply` make the patch with git inside a throwaway
+VM with no network, and the host only `git apply`s it to your repo, from the commit it recorded
+at clone time. `pi-vm exec` runs a check (say, the plan's tests) in a VM without the API key.
+`apply` copies `report.md` and `last-run.log` only when they are regular files, not symlinks the
+agent planted. The host writes the log through a descriptor opened before the VM starts.
 
 pi runs as **root** inside the VM, so it can `dnf install` whatever a task needs. Under rootless
 Podman that root is your own unprivileged user on the host. Chromium runs with `--no-sandbox`,
@@ -135,6 +144,8 @@ Then in Claude Code: "hand it off to pi".
 
 ```
 pi-vm run [--model ID] [--thinking LEVEL] "<prompt>"   run a handoff; prints the run dir
+pi-vm diff <run-dir> [--stat]   the run's changes as a patch (made in a VM)
+pi-vm exec <run-dir> -- <cmd>   run a check in a VM on the run's files, without the key
 pi-vm apply <run-dir>   copy the run's changes into the repo as uncommitted changes
 pi-vm clean <run-dir>   delete a run (or --all)
 pi-vm list              list runs

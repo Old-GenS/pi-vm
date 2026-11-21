@@ -40,7 +40,7 @@ if (( uninstall )); then
   [[ -d $SKILLS_DIR/pi-handoff ]] && rm -rf -- "$SKILLS_DIR/pi-handoff" && ok "removed the pi-handoff skill"
   if command -v podman >/dev/null; then
     podman image rm -f "$IMAGE" >/dev/null 2>&1 && ok "removed the image"
-    podman volume rm -f pi-vm-npm pi-vm-cache >/dev/null 2>&1 && ok "removed the cache volumes"
+    podman volume ls -q --filter name=pi-vm- | xargs -r podman volume rm -f >/dev/null 2>&1 && ok "removed the cache volumes"
   fi
   echo "Kept: $CONFIG, $KEY_FILE, and runs in ~/.cache/pi-vm (delete them by hand if you like)."
   exit 0

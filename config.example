@@ -18,3 +18,6 @@ PI_VM_ROUTING='{"quantizations":["fp16","bf16","fp8"]}'
 # PI_VM_MEMORY=2g
 # PI_VM_CPUS=2
 # PI_VM_TIMEOUT_MIN=90   # at most 110 when Claude Code runs pi-vm (its Bash limit is 120)
+# PI_VM_STALL_MIN=15     # stop when no file changed for this many minutes (0: off)
+# PI_VM_DISK_MAX_GB=20   # stop when the run dir uses more than this many GB (0: off)
+# PI_VM_MIN_FREE_GB=2    # ...or the disk has less than this many GB free (0: off)

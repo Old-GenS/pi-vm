@@ -1,7 +1,7 @@
 ---
 name: pi-handoff
 description: Write an execution spec to .handoff/plan.md, run it with pi (the pi.dev coding agent) on an OpenRouter model with full access inside a throwaway microVM on a clone of the repo, verify and review the result, report, and apply the changes to the repo when the user approves. Use when the user says "hand it off to pi", "use pi", "pi-vm", "run it with mimo" or names another OpenRouter model to run a handoff ("hand it off with qwen/kimi/glm/gpt"). For "hand off" or "use dsh/deepseek" with no pi or model named, use the handoff skill (dsh) instead.
-allowed-tools: Read, Glob, Grep, Write, Bash(pi-vm:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*), Bash(git -C:*)
+allowed-tools: Read, Glob, Grep, Write, Bash(pi-vm:*), Bash(git rev-parse:*), Bash(git status:*), Bash(git diff:*)
 ---
 
 Do not implement anything yourself. You plan, the executor implements, you verify.
@@ -159,11 +159,17 @@ run: pi-vm stops the VM itself when no file in the run dir changes for 15 minute
 
 ## 4. Verify and review (read-only)
 
-When the run finishes, take the run dir from the first line of the command's output. Every check
-below runs in the run dir (`git -C <run dir> ...`, or commands with that working directory), not in
-the repo:
+When the run finishes, take the run dir from the first line of the command's output.
 
-- Read `<run dir>/.handoff/report.md`. If it is missing, read only the log's status lines, never
+**The run dir is the agent's: never run git or any of its code on the host there.** The agent
+controls its `.git` (hooks, `core.fsmonitor`, filter and diff drivers run by host git) and its
+scripts (`npm test` runs whatever its `package.json` says). Look at its changes with
+`pi-vm diff`, which makes the patch inside a throwaway VM, and run commands with `pi-vm exec`,
+which runs them in a VM without the API key. Reading files with Read, Grep or `cat` is fine, but
+only regular files: check with `test -f <file> && ! test -L <file>` first, since a planted symlink
+could point at any file on this machine.
+
+- Read `<run dir>/.handoff/report.md` (after the regular-file check). If it is missing, read only the log's status lines, never
   the model's thinking (the lines starting with `  ┆`): pulling another model's reasoning into this
   conversation can trip Anthropic's safety filter and end the session for good. Use
   `grep -v '^  ┆' <run dir>/.handoff/last-run.log | tail -20`; its last lines give the token and
@@ -173,10 +179,10 @@ the repo:
   run has often finished the work and then looped, so run the Acceptance commands before
   deciding. If it says `run failed`, the model or OpenRouter
   returned an error: give the error.
-- Run `git status --porcelain` and `git diff --stat` to see what actually changed.
-- Run each **Acceptance** command from the plan and compare against its expected result.
-- Review the code: read the full `git diff` and every new untracked file (`git diff` does not show
-  those). Check it against `.handoff/plan.md` for bugs, missing or half-done steps, changes outside
+- Run `pi-vm diff <run dir> --stat` to see what actually changed (new files included).
+- Run each **Acceptance** command as `pi-vm exec <run dir> -- <command>` (for a shell line:
+  `pi-vm exec <run dir> -- sh -c '<command>'`) and compare against its expected result.
+- Review the code: read the full `pi-vm diff <run dir>` (it includes new files). Check it against `.handoff/plan.md` for bugs, missing or half-done steps, changes outside
   **Files to touch**, and anything **Out of scope**. Passing Acceptance does not end the review.
 - Review the diff, not the report: `report.md` is the executor's account of its work, not the change.
 - Check the diff against the repo's own written rules (`AGENTS.md`, `CONTRIBUTING`, `README`, or
@@ -185,12 +191,14 @@ the repo:
 - Before recommending apply, check the run with the repo's own checks, never the executor's copies:
   1. Find the paths the repo uses to judge itself: its test, check and analysis directories and
      files, as named by `package.json`, `Makefile`, CI config, or the contributing docs.
-  2. `git -C <run dir> diff --name-only HEAD -- <those paths>` — any file listed is a flag: the
+  2. Look for those paths in `pi-vm diff <run dir> --stat` — any file listed is a flag: the
      executor edited something that judges it.
-  3. `git -C <run dir> checkout HEAD -- <those paths>` — restores them exactly as they are in the
-     repo (the run dir's HEAD is the repo's HEAD), discarding the executor's edits to them. This is
+  3. `pi-vm exec <run dir> -- git checkout "$(cat ~/.cache/pi-vm/runs/.base/<run name>)" --
+     <those paths>` — restores them exactly as they are in the repo (the recorded base is the
+     repo's HEAD at clone time), discarding the executor's edits to them, inside the VM. This is
      the one edit allowed during verification.
-  4. Run the repo's own test and check commands, as the repo documents them. Report any flag that
+  4. Run the repo's own test and check commands, as the repo documents them, with
+     `pi-vm exec <run dir> -- ...`. Report any flag that
      involves a new or changed file, with the check's raw output underneath.
   Report every flag to the user in plain words before anything else: what the model did, why it
   breaks the repo's rules, and what you recommend (fix it, or drop the run). Every flag is a stop,
