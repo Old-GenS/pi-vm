@@ -33,5 +33,7 @@ ENV HOME=/root PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
 COPY settings.json /root/.pi/agent/settings.json
 COPY render.jq summary.jq /usr/local/share/pi-vm/
 COPY pi-run /usr/local/bin/pi-run
+# The egress proxy the VM's only network path points at (see bin/pi-vm).
+COPY proxy/ /opt/egress/
 
 WORKDIR /work
