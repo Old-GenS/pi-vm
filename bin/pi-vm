@@ -51,9 +51,18 @@ TIMEOUT_MIN=${PI_VM_TIMEOUT_MIN:-90}    # the VM is killed after this many minut
 STALL_MIN=${PI_VM_STALL_MIN:-15}        # ...or after this many minutes with no file changed (0: off)
 DISK_MAX_GB=${PI_VM_DISK_MAX_GB:-20}     # stop when the run dir uses more than this many GB (0: off)
 MIN_FREE_GB=${PI_VM_MIN_FREE_GB:-2}      # ...or its disk has less than this many GB free (0: off)
-# The VM reaches the internet but not this computer: pasta without the gateway and
-# host.containers.internal mappings to the host. (It can still reach other machines on the LAN.)
-NETWORK=${PI_VM_NETWORK:-pasta:--no-map-gw,--map-guest-addr,none}
+# How the VM reaches the internet:
+#   proxy (default) — pasta forwards exactly one port, to a host-side HTTP/HTTPS proxy that
+#                     refuses anything that is not public space. No DNS, no raw TCP, no UDP.
+#   direct          — pasta gives the VM the open internet. It still cannot reach this computer
+#                     or its gateway, but it can reach the LAN and any public port.
+EGRESS=${PI_VM_EGRESS:-proxy}
+EGRESS_PORT=${PI_VM_EGRESS_PORT:-3128}
+if [[ $EGRESS == proxy ]]; then
+  NETWORK=${PI_VM_NETWORK:-pasta:-q,-T,$EGRESS_PORT,-U,none,--no-map-gw}
+else
+  NETWORK=${PI_VM_NETWORK:-pasta:--no-map-gw,--map-guest-addr,none}
+fi
 RUNS=${PI_VM_RUNS:-${XDG_CACHE_HOME:-$HOME/.cache}/pi-vm/runs}
 # npm's download cache and ~/.cache, kept between runs (podman volumes) so `npm ci` and
 # Playwright/Puppeteer browser downloads happen once. Each repo gets its own pair
@@ -64,6 +73,46 @@ HOME_CACHE=${PI_VM_CACHE:-pi-vm-cache}
 KEY_FILE=$HOME/.bashrc.d/openrouter.sh
 
 die() { echo "pi-vm: $*" >&2; exit 1; }
+
+# The egress proxy is a throwaway container from the same image, published on the host's
+# loopback. pasta's -T forwards exactly that port out of the VM, so the proxy is its only way
+# out; inside the VM it is reached at 127.0.0.1:<port> (pasta shares the host's loopback).
+EGRESS_NAME=
+EGRESS_ENV=()
+
+port_open() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
+
+start_egress() {
+  [[ $EGRESS == proxy ]] || return 0
+  local owner=$1 url i
+  port_open "$EGRESS_PORT" && die "port $EGRESS_PORT is already in use (set PI_VM_EGRESS_PORT)"
+  EGRESS_NAME="$owner-egress"
+  podman run -d --rm --name "$EGRESS_NAME" \
+    --publish "127.0.0.1:$EGRESS_PORT:$EGRESS_PORT" \
+    -e EGRESS_PORT="$EGRESS_PORT" -e EGRESS_DEBUG="${PI_VM_EGRESS_DEBUG:-0}" \
+    "$IMAGE" node --experimental-strip-types /opt/egress/serve.ts >/dev/null \
+    || die "couldn't start the egress proxy"
+  for i in {1..50}; do
+    port_open "$EGRESS_PORT" && break
+    podman ps --format '{{.Names}}' | grep -qx -- "$EGRESS_NAME" \
+      || die "the egress proxy exited; see: podman logs $EGRESS_NAME"
+    sleep 0.2
+  done
+  port_open "$EGRESS_PORT" || die "the egress proxy did not start listening on port $EGRESS_PORT"
+  url="http://127.0.0.1:$EGRESS_PORT"
+  EGRESS_ENV=(
+    -e "HTTP_PROXY=$url" -e "HTTPS_PROXY=$url" -e "http_proxy=$url" -e "https_proxy=$url"
+    -e "NO_PROXY=localhost,127.0.0.1,::1" -e "no_proxy=localhost,127.0.0.1,::1"
+    -e NODE_USE_ENV_PROXY=1
+  )
+  trap stop_egress EXIT
+}
+
+stop_egress() {
+  [[ -n $EGRESS_NAME ]] || return 0
+  podman stop -t 2 "$EGRESS_NAME" >/dev/null 2>&1 || true
+  EGRESS_NAME=
+}
 
 # A run dir must sit directly inside $RUNS, so apply/clean never touch anything else.
 run_dir() {
@@ -218,6 +267,7 @@ what you checked, and anything you left undone."
   echo "pi-vm: model $model, thinking $thinking"
   jq -r 'if .order then "pi-vm: providers, in order: \(.order | join(", "))" else empty end' <<<"$routing"
   local status=0 started=$SECONDS stalled=0 name; name="pi-vm-$(basename -- "$dir")"
+  start_egress "$name"
   local log="$dir/.handoff/last-run.log"
   # The host writes the log only through this descriptor, opened before the VM starts: a symlink
   # the agent plants at that path later can't redirect the host's own status lines.
@@ -228,6 +278,7 @@ what you checked, and anything you left undone."
   trap 'podman stop -t 5 "$name" >/dev/null 2>&1; exit 130' INT TERM
   podman run --rm --runtime "$RUNTIME" --memory "$MEMORY" --cpus "$CPUS" \
     --timeout "$((TIMEOUT_MIN * 60))" --name "$name" --network "$NETWORK" \
+    ${EGRESS_ENV[@]+"${EGRESS_ENV[@]}"} \
     -e OPENROUTER_API_KEY -e PI_VM_MODEL="$model" -e PI_VM_THINKING="$thinking" \
     -v "$dir:/work:Z" -v "$agent_dir/models.json:/root/.pi/agent/models.json:ro,Z" \
     -v "$NPM_CACHE-$cache_key:/root/.npm" -v "$HOME_CACHE-$cache_key:/root/.cache" -w /work "$IMAGE" \
@@ -310,7 +361,9 @@ cmd_exec() {
   local dir; dir=$(run_dir "${1:-}"); shift
   [[ ${1:-} == -- ]] && shift
   (( $# )) || die "exec: command required"
+  start_egress "pi-vm-exec-$$"
   podman run --rm --runtime "$RUNTIME" --memory "$MEMORY" --cpus "$CPUS" --network "$NETWORK" \
+    ${EGRESS_ENV[@]+"${EGRESS_ENV[@]}"} \
     --timeout "$((TIMEOUT_MIN * 60))" -v "$dir:/work:Z" -w /work "$IMAGE" \
     sh -c 'if command -v no-ipv6 >/dev/null; then exec no-ipv6 "$@"; else exec "$@"; fi' sh "$@"
 }

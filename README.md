@@ -90,9 +90,16 @@ so pi-vm exits non-zero when the last model call ended in an error.
 |---|---|
 | A clone of the repo (with `.handoff/`) | Your real checkout and its `.git` |
 | `OPENROUTER_API_KEY` | SSH keys, `gh` token, any git remote: **it cannot push** |
-| The internet (OpenRouter, npm, web) | Your home directory and the rest of the host |
+| HTTP and HTTPS, through the egress proxy (OpenRouter, npm, web) | Any other kind of network traffic: no DNS, no raw TCP, no UDP, no SSH |
 | This repo's own npm cache and `~/.cache` (podman volumes, one pair per repo) | The host kernel (libkrun gives the VM its own) |
-| | Services on this computer: no gateway or host-address mapping (other LAN machines are still reachable) |
+| | This computer and every other non-public address: the proxy refuses them |
+
+The VM's only way out is `127.0.0.1:3128` inside the VM, which pasta forwards to a proxy running
+on the host. The proxy resolves every name itself, refuses any address that is not public space,
+and connects to the address it vetted — so a DNS answer that changes after the check cannot get
+around it. That means HTTP and HTTPS only; raw TCP, UDP and SSH have no path. `PI_VM_EGRESS=direct`
+restores the old open pasta network; `PI_VM_EGRESS_PORT` (default `3128`) and
+`PI_VM_EGRESS_DEBUG=1` (log refused destinations) are the other knobs.
 
 The key is the one secret inside, so give it a **credit limit** in OpenRouter's key settings.
 
